@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>太空數學漫遊 (Space Math Wanderer)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0faff; font-family: 'Segoe UI', sans-serif; touch-action: none; }
+        canvas { display: block; }
+        
+        #instructions {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 100;
+            cursor: pointer;
+            transition: opacity 0.5s;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #0055ff;
+            font-size: 20px;
+            font-weight: bold;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.5);
+            padding: 10px;
+            border-radius: 10px;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0, 85, 255, 0.2);
+        }
+
+        .money-text { color: #b8860b; font-size: 24px; margin-top: 5px; display: block; }
+
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(0, 85, 255, 0.5);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 4px; height: 4px;
+            background: #ff0055;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #msg-box {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            display: none;
+            text-shadow: 0 0 10px rgba(0,0,0,0.5);
+            background: rgba(255, 51, 102, 0.9);
+            padding: 10px 30px;
+            border-radius: 50px;
+            text-align: center;
+            z-index: 50;
+        }
+
+        #mobile-controls {
+            display: none;
+            position: absolute;
+            bottom: 30px;
+            left: 0;
+            width: 100%;
+            height: 180px;
+            pointer-events: none;
+            z-index: 80;
+        }
+
+        #joystick-base {
+            position: absolute;
+            bottom: 20px;
+            left: 40px;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border: 2px solid rgba(0, 85, 255, 0.4);
+            pointer-events: auto;
+        }
+
+        #joystick-knob {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            width: 60px;
+            height: 60px;
+            background: rgba(0, 85, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        #fire-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 40px;
+            width: 100px;
+            height: 100px;
+            background: rgba(255, 51, 102, 0.7);
+            border-radius: 50%;
+            border: 4px solid #fff;
+            pointer-events: auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-weight: bold;
+            font-size: 20px;
+            box-shadow: 0 0 20px rgba(255, 51, 102, 0.3);
+        }
+
+        .title { font-size: 42px; color: #0055ff; margin-bottom: 15px; }
+        .hint { font-size: 18px; color: #666; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <div id="instructions">
+        <div class="title">太空數學漫遊</div>
+        <p style="font-size: 20px;">漂浮在星際中，挑戰你的運算力！</p>
+        <p>射擊機器人身上黃色看板中正確的答案</p>
+        <p id="pc-controls-hint" style="background: #eef2ff; padding: 15px; border-radius: 15px; color: #444;">
+            W, A, S, D - 飛向前後左右<br>滑鼠旋轉視角 / 點擊左鍵射擊
+        </p>
+        <div class="hint">點擊畫面開始漫遊</div>
+    </div>
+
+    <div id="hud">
+        SCORE: <span id="score">000</span><br>
+        WAVE: <span id="wave">1</span><br>
+        <span class="money-text">獎金: $<span id="money">0</span></span>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="msg-box">答錯了！</div>
+
+    <div id="mobile-controls">
+        <div id="joystick-base">
+            <div id="joystick-knob"></div>
+        </div>
+        <div id="fire-btn">射擊</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script>
+        let scene, camera, renderer, raycaster, gunGroup;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let robots = [];
+        let coins = []; 
+        let spaceParticles = []; // 漫遊粒子
+        let debris = []; // 漂浮岩石
+        let score = 0;
+        let money = 0;
+        let wave = 1;
+        let isLocked = false;
+        let isMobile = false;
+
+        let joystickActive = false;
+        let joystickVector = new THREE.Vector2(0, 0);
+        let touchLookId = null;
+        let lastTouchX = 0, lastTouchY = 0;
+
+        let audioCtx;
+        const initAudio = () => { if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); };
+        
+        function playSound(freq, type, duration, volume = 0.1) {
+            if(!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        const sounds = {
+            shoot: () => playSound(150, 'square', 0.1, 0.05),
+            correct: () => {
+                playSound(523.25, 'sine', 0.2, 0.1); 
+                setTimeout(() => playSound(659.25, 'sine', 0.3, 0.1), 100); 
+            },
+            wrong: () => playSound(110, 'sawtooth', 0.4, 0.1),
+            explosion: () => playSound(60, 'triangle', 0.5, 0.2),
+            coin: () => {
+                playSound(987.77, 'sine', 0.1, 0.05); 
+                setTimeout(() => playSound(1318.51, 'sine', 0.2, 0.05), 50); 
+            }
+        };
+
+        const ACCEL = 90.0;
+        const FRICTION = 8.0;
+        const LOOK_SENSE = 0.0015;
+
+        const clock = new THREE.Clock();
+
+        function init() {
+            isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window);
+            
+            if (isMobile) {
+                document.getElementById('mobile-controls').style.display = 'block';
+                document.getElementById('pc-controls-hint').innerHTML = "左側搖桿移動 / 右側滑動旋轉視角<br>點擊「射擊」按鈕作答";
+            }
+
+            scene = new THREE.Scene();
+            // 亮淺藍色太空
+            scene.background = new THREE.Color(0xddeeff);
+            scene.fog = new THREE.Fog(0xddeeff, 10, 100);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 5); // 角色漂浮中心
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+
+            raycaster = new THREE.Raycaster();
+
+            // 明亮的環境光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.4);
+            scene.add(ambientLight);
+
+            const sunLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            sunLight.position.set(10, 20, 10);
+            scene.add(sunLight);
+
+            // 建立太空漫遊粒子 (代替地板提供運動感)
+            createWanderParticles();
+
+            // 建立一些大型漂浮岩石/水晶
+            createDebris();
+
+            createGun();
+            setupControls();
+
+            setInterval(() => {
+                if(isLocked && robots.length < 3 + Math.floor(wave/2)) spawnRobot();
+            }, 4000);
+
+            animate();
+        }
+
+        // 建立太空塵埃
+        function createWanderParticles() {
+            const partCount = 1500;
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array(partCount * 3);
+            for (let i = 0; i < partCount * 3; i++) {
+                positions[i] = THREE.MathUtils.randFloatSpread(150);
+            }
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const mat = new THREE.PointsMaterial({ color: 0x00aaff, size: 0.1, transparent: true, opacity: 0.6 });
+            const points = new THREE.Points(geo, mat);
+            scene.add(points);
+            spaceParticles = points;
+        }
+
+        // 建立漂浮雜物 (給予深度感)
+        function createDebris() {
+            const rockGeo = new THREE.IcosahedronGeometry(0.5, 0);
+            const rockMat = new THREE.MeshPhongMaterial({ color: 0xaaccff, flatShading: true });
+            for (let i = 0; i < 40; i++) {
+                const rock = new THREE.Mesh(rockGeo, rockMat);
+                rock.position.set(
+                    THREE.MathUtils.randFloatSpread(100),
+                    THREE.MathUtils.randFloatSpread(100),
+                    THREE.MathUtils.randFloatSpread(100)
+                );
+                rock.rotation.set(Math.random(), Math.random(), Math.random());
+                rock.scale.setScalar(0.5 + Math.random() * 2);
+                scene.add(rock);
+                debris.push(rock);
+            }
+        }
+
+        function createGun() {
+            gunGroup = new THREE.Group();
+            const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.2, 0.6), new THREE.MeshPhongMaterial({ color: 0x777777 }));
+            gunGroup.add(gunBody);
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5), new THREE.MeshPhongMaterial({ color: 0x444444 }));
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.z = -0.4;
+            gunGroup.add(barrel);
+            gunGroup.position.set(0.4, -0.4, -0.6);
+            camera.add(gunGroup);
+            scene.add(camera);
+        }
+
+        function setupControls() {
+            const inst = document.getElementById('instructions');
+            inst.addEventListener('click', () => {
+                initAudio();
+                if (!isMobile) {
+                    document.body.requestPointerLock();
+                } else {
+                    isLocked = true;
+                    inst.style.opacity = "0";
+                    inst.style.pointerEvents = "none";
+                }
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                if (!isMobile) {
+                    isLocked = (document.pointerLockElement === document.body);
+                    inst.style.opacity = isLocked ? "0" : "1";
+                    inst.style.pointerEvents = isLocked ? "none" : "auto";
+                }
+            });
+
+            const onKey = (e, val) => {
+                switch (e.code) {
+                    case 'KeyW': moveForward = val; break;
+                    case 'KeyS': moveBackward = val; break;
+                    case 'KeyA': moveLeft = val; break;
+                    case 'KeyD': moveRight = val; break;
+                }
+            };
+            document.addEventListener('keydown', (e) => onKey(e, true));
+            document.addEventListener('keyup', (e) => onKey(e, false));
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isLocked || isMobile) return;
+                camera.rotation.y -= e.movementX * LOOK_SENSE;
+                let newX = camera.rotation.x - e.movementY * LOOK_SENSE;
+                camera.rotation.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, newX));
+            });
+
+            camera.rotation.order = 'YXZ';
+            document.addEventListener('mousedown', () => { if (isLocked && !isMobile) shoot(); });
+
+            if (isMobile) {
+                const joystickBase = document.getElementById('joystick-base');
+                const joystickKnob = document.getElementById('joystick-knob');
+                const fireBtn = document.getElementById('fire-btn');
+
+                fireBtn.addEventListener('touchstart', (e) => { e.preventDefault(); if (isLocked) shoot(); });
+
+                window.addEventListener('touchstart', (e) => {
+                    if (!isLocked) return;
+                    for (let touch of e.changedTouches) {
+                        if (touch.clientX > window.innerWidth / 2 && touchLookId === null) {
+                            touchLookId = touch.identifier;
+                            lastTouchX = touch.clientX;
+                            lastTouchY = touch.clientY;
+                        }
+                    }
+                });
+
+                window.addEventListener('touchmove', (e) => {
+                    if (!isLocked) return;
+                    for (let touch of e.touches) {
+                        if (touch.identifier === touchLookId) {
+                            camera.rotation.y -= (touch.clientX - lastTouchX) * 0.005;
+                            let newX = camera.rotation.x - (touch.clientY - lastTouchY) * 0.005;
+                            camera.rotation.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, newX));
+                            lastTouchX = touch.clientX; lastTouchY = touch.clientY;
+                        }
+                        if (joystickActive && touch.clientX < window.innerWidth / 2) {
+                            const rect = joystickBase.getBoundingClientRect();
+                            const dx = touch.clientX - (rect.left + rect.width / 2);
+                            const dy = touch.clientY - (rect.top + rect.height / 2);
+                            const dist = Math.hypot(dx, dy);
+                            const maxLen = 45;
+                            const lx = dist > maxLen ? dx * (maxLen/dist) : dx;
+                            const ly = dist > maxLen ? dy * (maxLen/dist) : dy;
+                            joystickKnob.style.transform = `translate(${lx}px, ${ly}px)`;
+                            joystickVector.set(lx / maxLen, ly / maxLen);
+                        }
+                    }
+                });
+
+                joystickBase.addEventListener('touchstart', () => { joystickActive = true; });
+                window.addEventListener('touchend', (e) => {
+                    for (let touch of e.changedTouches) {
+                        if (touch.identifier === touchLookId) touchLookId = null;
+                        if (touch.clientX < window.innerWidth / 2) {
+                            joystickActive = false; joystickKnob.style.transform = `translate(0,0)`; joystickVector.set(0,0);
+                        }
+                    }
+                });
+            }
+        }
+
+        function createTextTexture(text, bgColor = '#fff', textColor = '#000', fontSize = 100) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = bgColor; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = `bold ${fontSize * 2}px "Arial Black", sans-serif`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 20; ctx.strokeText(text, 512, 256);
+            ctx.fillStyle = textColor; ctx.fillText(text, 512, 256);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return texture;
+        }
+
+        function spawnRobot() {
+            const group = new THREE.Group();
+            const a = Math.floor(Math.random() * 9) + 1;
+            const b = Math.floor(Math.random() * 9) + 1;
+            const isAdd = Math.random() > 0.5;
+            const questionText = isAdd ? `${a} + ${b} = ?` : `${Math.max(a, b)} - ${Math.min(a, b)} = ?`;
+            const answer = isAdd ? (a + b) : Math.abs(a - b);
+            
+            let options = [answer];
+            while(options.length < 3) {
+                let fake = Math.floor(Math.random() * 18) + 1;
+                if(!options.includes(fake)) options.push(fake);
+            }
+            options.sort(() => Math.random() - 0.5);
+
+            const bodyMat = new THREE.MeshPhongMaterial({ color: 0x0088ff });
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.4), bodyMat);
+            body.position.y = 0; group.add(body); // 基準點在身體中心
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.4), bodyMat);
+            head.position.y = 0.85; group.add(head);
+            const armGeo = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+            const armL = new THREE.Mesh(armGeo, bodyMat); armL.position.set(-0.5, 0, 0); group.add(armL);
+            const armR = new THREE.Mesh(armGeo, bodyMat); armR.position.set(0.5, 0, 0); group.add(armR);
+            const legGeo = new THREE.BoxGeometry(0.25, 0.8, 0.25);
+            const legL = new THREE.Mesh(legGeo, bodyMat); legL.position.set(-0.25, -1, 0); group.add(legL);
+            const legR = new THREE.Mesh(legGeo, bodyMat); legR.position.set(0.25, -1, 0); group.add(legR);
+
+            const qBoard = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 0.8), new THREE.MeshBasicMaterial({ map: createTextTexture(questionText, '#ff8800', '#fff', 90) }));
+            qBoard.position.y = 1.8; group.add(qBoard);
+
+            const targetPositions = [new THREE.Vector3(0, 0, 0.21), new THREE.Vector3(-0.35, -1, 0.15), new THREE.Vector3(0.35, -1, 0.15)];
+            const targets = options.map((val, i) => {
+                const tMesh = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.1), new THREE.MeshBasicMaterial({ map: createTextTexture(val.toString(), '#ffcc00', '#000', 120) }));
+                tMesh.position.copy(targetPositions[i]);
+                tMesh.userData = { isCorrect: val === answer };
+                group.add(tMesh); return tMesh;
+            });
+
+            const angle = (Math.random() - 0.5) * (Math.PI / 1.4);
+            const dist = 25 + Math.random() * 10;
+            group.position.set(Math.sin(angle) * dist, (Math.random()-0.5)*10, -Math.cos(angle) * dist);
+            group.userData = { speed: 0.8 + (wave * 0.25), targets, legL, legR, armL, armR, offset: Math.random() * Math.PI * 2 };
+            scene.add(group); robots.push(group);
+        }
+
+        function spawnCoin(pos) {
+            const coinGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.05, 16);
+            const coinMat = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0x442200, shininess: 100 });
+            const coin = new THREE.Mesh(coinGeo, coinMat);
+            coin.rotation.x = Math.PI / 2; coin.position.copy(pos); scene.add(coin);
+            coins.push({ mesh: coin, velocity: new THREE.Vector3(0, 0.05, 0), state: 'poping', timer: 0 });
+        }
+
+        function shoot() {
+            sounds.shoot();
+            const muzzleFlash = new THREE.PointLight(0xffaa00, 5, 2);
+            muzzleFlash.position.set(0.4, -0.3, -1); camera.add(muzzleFlash);
+            setTimeout(() => camera.remove(muzzleFlash), 50);
+            gunGroup.position.z += 0.15; setTimeout(() => gunGroup.position.z -= 0.15, 60);
+
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const allTargets = [];
+            robots.forEach(r => allTargets.push(...r.userData.targets));
+            const intersects = raycaster.intersectObjects(allTargets);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0].object;
+                const robot = hit.parent;
+                if (hit.userData.isCorrect) {
+                    sounds.correct(); sounds.explosion();
+                    const worldPos = hit.getWorldPosition(new THREE.Vector3());
+                    createExplosion(worldPos); spawnCoin(worldPos); 
+                    scene.remove(robot); robots = robots.filter(r => r !== robot);
+                    score += 10; updateHUD();
+                } else {
+                    sounds.wrong();
+                    const penalty = 10 * wave; money = Math.max(0, money - penalty);
+                    showMsg(`答錯了！扣除獎金 $${penalty}`);
+                    robot.userData.speed *= 2.0; hit.material.color.set(0xff0000); updateHUD();
+                }
+            }
+        }
+
+        function updateHUD() {
+            document.getElementById('score').innerText = score.toString().padStart(3, '0');
+            document.getElementById('money').innerText = money.toLocaleString();
+            wave = Math.floor(score / 50) + 1;
+            document.getElementById('wave').innerText = wave;
+        }
+
+        function showMsg(text) {
+            const box = document.getElementById('msg-box');
+            box.innerText = text; box.style.display = 'block';
+            setTimeout(() => box.style.display = 'none', 1500);
+        }
+
+        function createExplosion(pos) {
+            const count = 10;
+            const geo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+            const mat = new THREE.MeshBasicMaterial({ color: 0x00aaff });
+            for(let i=0; i<count; i++) {
+                const p = new THREE.Mesh(geo, mat); p.position.copy(pos);
+                const vel = new THREE.Vector3((Math.random()-0.5)*0.3, (Math.random()-0.5)*0.3, (Math.random()-0.5)*0.3);
+                scene.add(p);
+                let life = 1.0;
+                const frame = () => { p.position.add(vel); life -= 0.05; p.scale.setScalar(life); if(life > 0) requestAnimationFrame(frame); else scene.remove(p); };
+                frame();
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            const time = Date.now() * 0.007;
+
+            if (isLocked) {
+                velocity.x -= velocity.x * FRICTION * delta;
+                velocity.z -= velocity.z * FRICTION * delta;
+
+                let inputX = (Number(moveRight) - Number(moveLeft)) + (isMobile ? joystickVector.x : 0);
+                let inputZ = (Number(moveBackward) - Number(moveForward)) + (isMobile ? joystickVector.y : 0);
+
+                direction.set(inputX, 0, inputZ);
+                if (direction.length() > 0) direction.normalize();
+
+                velocity.x += direction.x * ACCEL * delta;
+                velocity.z += direction.z * ACCEL * delta;
+
+                camera.translateX(velocity.x * delta);
+                camera.translateZ(velocity.z * delta);
+                
+                // 漫遊限制
+                camera.position.x = Math.max(-25, Math.min(25, camera.position.x));
+                camera.position.z = Math.max(-10, Math.min(45, camera.position.z));
+                camera.position.y = Math.sin(time * 0.2) * 0.2; // 漂浮感
+
+                // 漂浮雜物旋轉
+                debris.forEach(rock => {
+                    rock.rotation.y += 0.005; rock.rotation.x += 0.002;
+                });
+
+                // 機器人與走路動作 (漂浮中的走路)
+                robots.forEach((robot, i) => {
+                    robot.lookAt(camera.position);
+                    const dir = new THREE.Vector3().subVectors(camera.position, robot.position).normalize();
+                    robot.position.addScaledVector(dir, robot.userData.speed * delta);
+                    const swing = Math.sin(time + robot.userData.offset) * 0.7;
+                    robot.userData.legL.rotation.x = swing; robot.userData.legR.rotation.x = -swing;
+                    robot.userData.armL.rotation.x = -swing; robot.userData.armR.rotation.x = swing;
+
+                    if (robot.position.distanceTo(camera.position) < 3) {
+                        sounds.wrong();
+                        const penalty = 20 * wave; money = Math.max(0, money - penalty);
+                        showMsg(`被抓到了！扣除獎金 $${penalty}`);
+                        score = Math.max(0, score - 5); updateHUD();
+                        scene.remove(robot); robots.splice(i, 1);
+                    }
+                });
+
+                // 金幣與漂浮效果
+                for (let i = coins.length - 1; i >= 0; i--) {
+                    const c = coins[i]; c.mesh.rotation.y += 0.1;
+                    if (c.state === 'poping') {
+                        c.mesh.position.add(c.velocity); c.velocity.y -= 0.002;
+                        c.timer += delta; if (c.timer > 0.5) c.state = 'flying';
+                    } else {
+                        const toPlayer = new THREE.Vector3().subVectors(camera.position, c.mesh.position).normalize();
+                        c.mesh.position.addScaledVector(toPlayer, 1.2);
+                        if (c.mesh.position.distanceTo(camera.position) < 0.6) {
+                            sounds.coin(); money += (10 * wave); updateHUD();
+                            scene.remove(c.mesh); coins.splice(i, 1);
+                        }
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        window.onload = init;
+    </script>
+</body>
+</html>
